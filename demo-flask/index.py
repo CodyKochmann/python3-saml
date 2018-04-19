@@ -5,7 +5,11 @@ from onelogin.saml2.utils import OneLogin_Saml2_Utils
 from urlparse import urlparse
 import os
 
+get_self_url = OneLogin_Saml2_Utils.get_self_url
+
+
 ''' example of a python saml flask server '''
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'onelogindemopytoolkit'
@@ -30,19 +34,18 @@ def prepare_flask_request(request):
 def index():
     req = prepare_flask_request(request)
     auth = init_saml_auth(req)
-    errors = []
-    success_slo = False
-    attributes = False
-    paint_logout = False
+    successful_log_out = False
 
     if 'sso' in request.args:
         return redirect(auth.login())
+
     elif 'sso2' in request.args:
         return redirect(
             auth.login(
                 '{}attrs/'.format(request.host_url)
             )
         )
+
     elif 'slo' in request.args:
         return redirect(
             auth.logout(
@@ -53,33 +56,30 @@ def index():
 
     elif 'acs' in request.args:
         auth.process_response()
-        if len(auth.get_errors()) == 0:
-            session['samlUserdata'] = auth.get_attributes()
-            session['samlNameId'] = auth.get_nameid()
-            session['samlSessionIndex'] = auth.get_session_index()
-            self_url = OneLogin_Saml2_Utils.get_self_url(req)
-            if 'RelayState' in request.form and self_url != request.form['RelayState']:
+        if not auth.get_errors():
+            session.update(
+                'samlUserdata': auth.get_attributes(),
+                'samlNameId': auth.get_nameid(),
+                'samlSessionIndex': auth.get_session_index()
+            )
+            if 'RelayState' in request.form and get_self_url(req) != request.form['RelayState']:
                 return redirect(auth.redirect_to(request.form['RelayState']))
+
     elif 'sls' in request.args:
         url = auth.process_slo(delete_session_cb=session.clear)
-        if len(auth.get_errors()) == 0:
+        if not auth.get_errors():
             if url is None:
-                success_slo = True
+                successful_log_out = True
             else:
                 return redirect(url)
 
-    if 'samlUserdata' in session:
-        paint_logout = True
-        if len(session['samlUserdata']) > 0:
-            attributes = session['samlUserdata'].items() # otherwise this is False?
-
     return render_template(
         'index.html',
-        errors=errors,
+        errors=[],
         not_auth_warn=(not auth.is_authenticated()),
-        success_slo=success_slo,
-        attributes=attributes,
-        paint_logout=paint_logout
+        successful_log_out=successful_log_out,
+        attributes=session.get('samlUserdata', {}).items(),
+        paint_logout=('samlUserdata' in session)
     )
 
 
@@ -88,7 +88,7 @@ def attrs():
     return render_template(
         'attrs.html',
         paint_logout='samlUserdata' in session,
-        attributes=session['samlUserdata'].items() if 'samlUserdata' in session and len(session['samlUserdata']) > 0 else False
+        attributes=session.get('samlUserdata', {}).items()
     )
 
 
